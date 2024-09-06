@@ -1,3 +1,4 @@
+version : '3'
 services:
   web:
     image: huangluxiao/sourcemap-parser:v1.0
