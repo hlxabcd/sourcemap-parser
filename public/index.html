@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Source Map Parser</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      background: white;
+      padding: 20px;
+      border-radius: 5px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      box-sizing: border-box;
+    }
+    h1, h2 {
+      text-align: center;
+      color: #333;
+    }
+    .input-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    select, label, textarea, button {
+      padding: 10px;
+      margin-top: 10px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    select {
+      flex-grow: 1;
+    }
+    label[for="zipFile"] {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 10px;
+      cursor: pointer;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    button {
+      width: 100%;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    textarea {
+      width: 100%;
+      resize: vertical;
+    }
+    pre {
+      background: #f9f9f9;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      overflow-x: auto;
+      font-family: monospace;
+      box-sizing: border-box;
+    }
+    .highlight {
+      background-color: yellow;
+    }
+    .error {
+      background-color: #ffcccc;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>选择 Source Map 文件</h1>
+  <div class="input-group">
+    <select id="mapFileSelect"></select>
+    <label for="zipFile">上传
+      <input type="file" id="zipFile" onchange="uploadZip()">
+    </label>
+  </div>
+  <textarea id="stacktrace" rows="10" placeholder="输入堆栈信息"></textarea>
+  <button onclick="parseStacktrace()">解析</button>
+
+  <h2>解析结果</h2>
+  <pre id="result"></pre>
+</div>
+
+<script>
+  function setCookie(name, value, days) {
+    let expires = '';
+    if (days) {
+      const date = new Date();
+      date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+      expires = '; expires=' + date.toUTCString();
+    }
+    document.cookie = name + '=' + (value || '') + expires + '; path=/';
+  }
+
+  function getCookie(name) {
+    const nameEQ = name + '=';
+    const ca = document.cookie.split(';');
+    for (let i = 0; i < ca.length; i++) {
+      let c = ca[i];
+      while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+      if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+    }
+    return null;
+  }
+
+  function getQueryParams() {
+    const params = new URLSearchParams(window.location.search);
+    const version = params.get('version');
+    const trace = params.get('trace');
+    const match = params.get('match');
+    return { version, trace, match };
+  }
+
+  async function fetchMapFiles() {
+    const { version } = getQueryParams();
+    let url = `/sourcemaps`;
+    if (version) {
+      url += `?version=${version}`;
+    }
+    const response = await fetch(url);
+    const files = await response.json();
+    const select = document.getElementById('mapFileSelect');
+    select.innerHTML = '';
+    files.forEach(file => {
+      const option = document.createElement('option');
+      option.value = file;
+      option.innerText = file;
+      select.appendChild(option);
+    });
+
+    const selectedMapFile = getCookie('selectedMapFile');
+    const lastStacktrace = getCookie('lastStacktrace');
+
+    // 如果请求参数有trace,则自动解析
+    const { trace, match } = getQueryParams();
+    // 遍历files列表找到第一个存在match字符串的map进行自动解析请求
+    if (trace) {
+      document.getElementById('stacktrace').value = decodeURIComponent(trace);
+      files.forEach(file => {
+        if (file.includes(match)) {
+          select.value = file;
+          parseStacktrace(file);
+        }
+      });
+    } else{
+      // 如果cookie中存在selectedMapFile,则选中该map
+      if (selectedMapFile) {
+        select.value = selectedMapFile;
+      }
+      // 如果cookie中存在lastStacktrace,则自动填充
+      if (lastStacktrace) {
+        document.getElementById('stacktrace').value = lastStacktrace;
+      }
+    }
+  }
+
+  async function uploadZip() {
+    const fileInput = document.getElementById('zipFile');
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('zipFile', file);
+
+    const response = await fetch('/upload-zip', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (response.ok) {
+      alert('ZIP file uploaded and extracted successfully.');
+      fetchMapFiles();
+    } else {
+      const errorData = await response.json();
+      alert('Error: ' + errorData.error);
+    }
+  }
+
+  async function parseStacktrace(defaultMapFile = null) {
+    const select = document.getElementById('mapFileSelect');
+    const textarea = document.getElementById('stacktrace');
+    const result = document.getElementById('result');
+
+    setCookie('selectedMapFile', select.value, 7);
+    setCookie('lastStacktrace', textarea.value, 7);
+
+    const mapFile = defaultMapFile || select.value;
+
+    const response = await fetch('/parse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        mapFile: mapFile,
+        stacktrace: textarea.value
+      })
+    });
+
+    const data = await response.json();
+    result.innerHTML = data.parsedStacktrace;
+  }
+
+  fetchMapFiles();
+</script>
+</body>
+</html>

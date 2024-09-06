@@ -1,0 +1,13 @@
+services:
+  web:
+    image: huangluxiao/sourcemap-parser:v1.0
+    container_name: sourcemap-parser
+    build:
+      context: .
+      dockerfile: Dockerfile # 使用生产环境的 Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./sourcemaps:/usr/src/app/sourcemaps # 仅映射 sourcemaps 目录（如果确实需要）
+    environment:
+      - APP_ENV=production
